@@ -100,7 +100,7 @@ show_directory_structure() {
 	fi
 
 	if [[ $has_tree -eq 1 ]]; then
-		tree "$target_dir" 2>/dev/null || echo -e "${FOLDER} $target_dir/"
+		tree -P "*.c" -P "*.cpp" -P "*.cxx" -P "*.cc" -P "*.C" -P "*.h" -P "*.hpp" -P "*.hxx" "$target_dir" 2>/dev/null || echo -e "${FOLDER} $target_dir/"
 	else
 		echo -e "${FOLDER} $target_dir/"
 		find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null |
