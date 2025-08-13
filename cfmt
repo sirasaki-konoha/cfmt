@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# C/C++ファイルの自動フォーマットスクリプト
+# C/C++ファイルの自動フォーマットスクリプト（マルチスレッド対応）
 # clang-formatを使用してコードを整形し、処理したファイルを表示します
 
 # カラー定義
@@ -19,202 +19,356 @@ readonly ARROW="→"
 readonly FOLDER="📁"
 readonly FILE="📄"
 
-# 統計情報
-total_files=0
-formatted_files=0
-failed_files=0
+# 統計情報（並行処理用にロックファイルを使用）
+readonly STATS_DIR="/tmp/cfmt_$$"
+readonly TOTAL_FILE="$STATS_DIR/total"
+readonly SUCCESS_FILE="$STATS_DIR/success"
+readonly FAILED_FILE="$STATS_DIR/failed"
+
+# デフォルトの並列処理数（CPUコア数）
+readonly DEFAULT_JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "4")
 
 # clang-formatスタイル設定
 clang_format_style=""
+jobs="$DEFAULT_JOBS"
+
+# 統計情報ディレクトリを作成
+init_stats() {
+    mkdir -p "$STATS_DIR"
+    echo "0" > "$TOTAL_FILE"
+    echo "0" > "$SUCCESS_FILE"
+    echo "0" > "$FAILED_FILE"
+}
+
+# 統計情報を更新（アトミック操作）
+increment_stat() {
+    local stat_file="$1"
+    local count
+    (
+        flock -x 200
+        count=$(cat "$stat_file" 2>/dev/null || echo "0")
+        echo $((count + 1)) > "$stat_file"
+    ) 200>"$stat_file.lock"
+}
+
+# 統計情報を取得
+get_stat() {
+    cat "$1" 2>/dev/null || echo "0"
+}
+
+# クリーンアップ
+cleanup() {
+    rm -rf "$STATS_DIR"
+}
 
 # スタイル設定を読み込み
 load_format_style() {
-	local cfmt_file=".cfmt"
+    local cfmt_file=".cfmt"
 
-	echo -e "${BLUE}${BOLD}=== スタイル設定 ===${NC}"
+    echo -e "${BLUE}${BOLD}=== スタイル設定 ===${NC}"
 
-	if [[ -f "$cfmt_file" ]]; then
-		# .cfmtファイルが存在する場合
-		local style_content=$(cat "$cfmt_file" 2>/dev/null | tr -d '\n\r' | sed 's/[[:space:]]*$//')
+    if [[ -f "$cfmt_file" ]]; then
+        # .cfmtファイルが存在する場合
+        local style_content=$(cat "$cfmt_file" 2>/dev/null | tr -d '\n\r' | sed 's/[[:space:]]*$//')
 
-		if [[ -n "$style_content" ]]; then
-			clang_format_style="$style_content"
-			echo -e "${GREEN}${CHECK} .cfmtファイルからスタイルを読み込みました${NC}"
-			echo -e "${CYAN}  スタイル: ${BOLD}$clang_format_style${NC}"
-		else
-			echo -e "${YELLOW}${CROSS} .cfmtファイルが空です - デフォルトスタイルを使用${NC}"
-			clang_format_style="LLVM"
-		fi
-	else
-		# .cfmtファイルが存在しない場合
-		echo -e "${YELLOW}${CROSS} .cfmtファイルが見つかりません - デフォルトスタイルを使用${NC}"
-		echo -e "${CYAN}  デフォルトスタイル: ${BOLD}LLVM${NC}"
-		echo -e "${YELLOW}  ヒント: .cfmtファイルにスタイルを指定できます${NC}"
-		echo -e "${YELLOW}    例: echo 'Google' > .cfmt${NC}"
-		echo -e "${YELLOW}    利用可能スタイル: LLVM, GNU, Google, Chromium, Microsoft, Mozilla, WebKit${NC}"
-		clang_format_style="LLVM"
-	fi
+        if [[ -n "$style_content" ]]; then
+            clang_format_style="$style_content"
+            echo -e "${GREEN}${CHECK} .cfmtファイルからスタイルを読み込みました${NC}"
+            echo -e "${CYAN}  スタイル: ${BOLD}$clang_format_style${NC}"
+        else
+            echo -e "${YELLOW}${CROSS} .cfmtファイルが空です - デフォルトスタイルを使用${NC}"
+            clang_format_style="LLVM"
+        fi
+    else
+        # .cfmtファイルが存在しない場合
+        echo -e "${YELLOW}${CROSS} .cfmtファイルが見つかりません - デフォルトスタイルを使用${NC}"
+        echo -e "${CYAN}  デフォルトスタイル: ${BOLD}LLVM${NC}"
+        echo -e "${YELLOW}  ヒント: .cfmtファイルにスタイルを指定できます${NC}"
+        echo -e "${YELLOW}    例: echo 'Google' > .cfmt${NC}"
+        echo -e "${YELLOW}    利用可能スタイル: LLVM, GNU, Google, Chromium, Microsoft, Mozilla, WebKit${NC}"
+        clang_format_style="LLVM"
+    fi
 
-	# .clang-formatファイルの存在もチェック
-	if [[ -f ".clang-format" ]] || [[ -f "_clang-format" ]]; then
-		echo -e "${BLUE}${ARROW} .clang-formatファイルも検出されました (こちらが優先されます)${NC}"
-	fi
+    # .clang-formatファイルの存在もチェック
+    if [[ -f ".clang-format" ]] || [[ -f "_clang-format" ]]; then
+        echo -e "${BLUE}${ARROW} .clang-formatファイルも検出されました (こちらが優先されます)${NC}"
+    fi
 
-	echo
+    echo
 }
+
 check_dependencies() {
-	echo -e "${BLUE}${BOLD}=== 依存関係チェック ===${NC}"
+    echo -e "${BLUE}${BOLD}=== 依存関係チェック ===${NC}"
 
-	if ! command -v clang-format >/dev/null 2>&1; then
-		echo -e "${RED}${CROSS} clang-formatが見つかりません${NC}" >&2
-		echo -e "${YELLOW}  インストール方法:${NC}"
-		echo -e "    Ubuntu/Debian: ${CYAN}sudo apt install clang-format${NC}"
-		echo -e "    CentOS/RHEL:   ${CYAN}sudo yum install clang-tools-extra${NC}"
-		echo -e "    macOS:         ${CYAN}brew install clang-format${NC}"
-		exit 1
-	fi
+    if ! command -v clang-format >/dev/null 2>&1; then
+        echo -e "${RED}${CROSS} clang-formatが見つかりません${NC}" >&2
+        echo -e "${YELLOW}  インストール方法:${NC}"
+        echo -e "    Ubuntu/Debian: ${CYAN}sudo apt install clang-format${NC}"
+        echo -e "    CentOS/RHEL:   ${CYAN}sudo yum install clang-tools-extra${NC}"
+        echo -e "    macOS:         ${CYAN}brew install clang-format${NC}"
+        exit 1
+    fi
 
-	echo -e "${GREEN}${CHECK} clang-format: $(clang-format --version | head -n1)${NC}"
+    echo -e "${GREEN}${CHECK} clang-format: $(clang-format --version | head -n1)${NC}"
+    echo -e "${GREEN}${CHECK} 並列処理数: ${BOLD}$jobs${NC} jobs"
 
-	if command -v tree >/dev/null 2>&1; then
-		echo -e "${GREEN}${CHECK} tree: $(tree --version | head -n1)${NC}"
-		echo
-		return 0
-	else
-		echo -e "${YELLOW}${CROSS} tree コマンドが利用できません (オプション)${NC}"
-		echo
-		return 1
-	fi
+    # GNU parallelの使用可能性をチェック
+    if command -v parallel >/dev/null 2>&1; then
+        echo -e "${GREEN}${CHECK} GNU parallel: $(parallel --version | head -n1)${NC}"
+        echo -e "${CYAN}  ${ARROW} GNU parallelを使用して高速処理します${NC}"
+    else
+        echo -e "${YELLOW}${CROSS} GNU parallel が利用できません${NC}"
+        echo -e "${CYAN}  ${ARROW} Bashのバックグラウンド処理を使用します${NC}"
+        echo -e "${YELLOW}  より高速化するには: ${CYAN}sudo apt install parallel${NC} または ${CYAN}brew install parallel${NC}"
+    fi
+
+    if command -v tree >/dev/null 2>&1; then
+        echo -e "${GREEN}${CHECK} tree: $(tree --version | head -n1)${NC}"
+        echo
+        return 0
+    else
+        echo -e "${YELLOW}${CROSS} tree コマンドが利用できません (オプション)${NC}"
+        echo
+        return 1
+    fi
 }
 
 # ディレクトリ構造を表示
 show_directory_structure() {
-	local target_dir="$1"
-	local has_tree="$2"
+    local target_dir="$1"
+    local has_tree="$2"
 
-	echo -e "${BLUE}${BOLD}=== ディレクトリ構造 ===${NC}"
+    echo -e "${BLUE}${BOLD}=== ディレクトリ構造 ===${NC}"
 
-	if [[ ! -d "$target_dir" ]]; then
-		echo -e "${RED}${CROSS} ディレクトリ '$target_dir' が存在しません${NC}" >&2
-		return 1
-	fi
+    if [[ ! -d "$target_dir" ]]; then
+        echo -e "${RED}${CROSS} ディレクトリ '$target_dir' が存在しません${NC}" >&2
+        return 1
+    fi
 
-	if [[ $has_tree -eq 1 ]]; then
-		tree -P "*.c" -P "*.cpp" -P "*.cxx" -P "*.cc" -P "*.C" -P "*.h" -P "*.hpp" -P "*.hxx" "$target_dir" 2>/dev/null || echo -e "${FOLDER} $target_dir/"
-	else
-		echo -e "${FOLDER} $target_dir/"
-		find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null |
-			head -10 | sed "s|^|  ${ARROW} |"
-		local count=$(find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null | wc -l)
-		if [[ $count -gt 10 ]]; then
-			echo -e "  ${ARROW} ... and $((count - 10)) more files"
-		fi
-	fi
-	echo
+    if [[ $has_tree -eq 1 ]]; then
+        tree -P "*.c" -P "*.cpp" -P "*.cxx" -P "*.cc" -P "*.C" -P "*.h" -P "*.hpp" -P "*.hxx" "$target_dir" 2>/dev/null || echo -e "${FOLDER} $target_dir/"
+    else
+        echo -e "${FOLDER} $target_dir/"
+        find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null |
+            head -10 | sed "s|^|  ${ARROW} |"
+        local count=$(find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null | wc -l)
+        if [[ $count -gt 10 ]]; then
+            echo -e "  ${ARROW} ... and $((count - 10)) more files"
+        fi
+    fi
+    echo
 }
 
-# 再帰的にディレクトリをフォーマット
-format_directory() {
-	local target_dir="$1"
-	local base_dir="$(cd "$target_dir" && pwd)"
+# 単一ファイルをフォーマット（ワーカー関数）
+format_single_file() {
+    local file="$1"
+    local base_dir="$2"
+    local style="$3"
+    
+    increment_stat "$TOTAL_FILE"
+    
+    local relative_path="${file#$base_dir/}"
+    
+    # スタイル指定でclang-formatを実行
+    local format_cmd="clang-format -i"
+    if [[ -n "$style" ]] && [[ ! -f ".clang-format" ]] && [[ ! -f "_clang-format" ]]; then
+        format_cmd="clang-format -i -style=$style"
+    fi
 
-	echo -e "${BLUE}${BOLD}=== フォーマット実行 ===${NC}"
-	echo -e "${CYAN}対象ディレクトリ: $target_dir${NC}"
-	echo
+    if eval "$format_cmd \"$file\"" 2>/dev/null; then
+        increment_stat "$SUCCESS_FILE"
+        echo -e "Processing: $relative_path ... ${GREEN}${CHECK} Success${NC}"
+    else
+        increment_stat "$FAILED_FILE"
+        echo -e "Processing: $relative_path ... ${RED}${CROSS} Failed${NC}"
+    fi
+}
 
-	# findで対象ファイルを検索してフォーマット
-	while IFS= read -r -d '' file; do
-		((total_files++))
+# GNU parallelを使用したフォーマット
+format_with_parallel() {
+    local target_dir="$1"
+    local base_dir="$(cd "$target_dir" && pwd)"
 
-		local relative_path="${file#$base_dir/}"
-		echo -n "Processing: $relative_path ... "
+    echo -e "${BLUE}${BOLD}=== フォーマット実行（GNU parallel使用） ===${NC}"
+    echo -e "${CYAN}対象ディレクトリ: $target_dir${NC}"
+    echo -e "${CYAN}並列処理数: $jobs${NC}"
+    echo
 
-		# スタイル指定でclang-formatを実行
-		local format_cmd="clang-format -i"
-		if [[ -n "$clang_format_style" ]] && [[ ! -f ".clang-format" ]] && [[ ! -f "_clang-format" ]]; then
-			format_cmd="clang-format -i -style=$clang_format_style"
-		fi
+    export -f format_single_file increment_stat get_stat
+    export RED GREEN BLUE YELLOW CYAN NC BOLD CHECK CROSS ARROW
+    export STATS_DIR TOTAL_FILE SUCCESS_FILE FAILED_FILE
 
-		if eval "$format_cmd \"$file\"" 2>/dev/null; then
-			((formatted_files++))
-			echo -e "${GREEN}${CHECK} Success${NC}"
-		else
-			((failed_files++))
-			echo -e "${RED}${CROSS} Failed${NC}"
-		fi
-	done < <(find "$target_dir" -type f \( \
-		-name "*.c" -o \
-		-name "*.cpp" -o \
-		-name "*.cxx" -o \
-		-name "*.cc" -o \
-		-name "*.C" -o \
-		-name "*.h" -o \
-		-name "*.hpp" -o \
-		-name "*.hxx" \
-		\) -print0 2>/dev/null)
+    find "$target_dir" -type f \( \
+        -name "*.c" -o \
+        -name "*.cpp" -o \
+        -name "*.cxx" -o \
+        -name "*.cc" -o \
+        -name "*.C" -o \
+        -name "*.h" -o \
+        -name "*.hpp" -o \
+        -name "*.hxx" \
+        \) -print0 2>/dev/null | \
+    parallel -0 -j "$jobs" format_single_file {} "$base_dir" "$clang_format_style"
+    
+    echo
+}
 
-	echo
+# Bashのバックグラウンド処理を使用したフォーマット
+format_with_bash() {
+    local target_dir="$1"
+    local base_dir="$(cd "$target_dir" && pwd)"
+
+    echo -e "${BLUE}${BOLD}=== フォーマット実行（Bash並列処理） ===${NC}"
+    echo -e "${CYAN}対象ディレクトリ: $target_dir${NC}"
+    echo -e "${CYAN}並列処理数: $jobs${NC}"
+    echo
+
+    local file_count=0
+    local job_count=0
+
+    while IFS= read -r -d '' file; do
+        # バックグラウンドでファイルをフォーマット
+        format_single_file "$file" "$base_dir" "$clang_format_style" &
+        
+        ((file_count++))
+        ((job_count++))
+        
+        # 指定された並列数に達したら待機
+        if [[ $job_count -ge $jobs ]]; then
+            wait
+            job_count=0
+        fi
+    done < <(find "$target_dir" -type f \( \
+        -name "*.c" -o \
+        -name "*.cpp" -o \
+        -name "*.cxx" -o \
+        -name "*.cc" -o \
+        -name "*.C" -o \
+        -name "*.h" -o \
+        -name "*.hpp" -o \
+        -name "*.hxx" \
+        \) -print0 2>/dev/null)
+
+    # 残りのジョブを待機
+    wait
+    echo
 }
 
 # 統計情報を表示
 show_statistics() {
-	echo -e "${BLUE}${BOLD}=== フォーマット結果 ===${NC}"
-	echo -e "${CYAN}処理ファイル数: ${BOLD}$total_files${NC}"
-	echo -e "${GREEN}成功:         ${BOLD}$formatted_files${NC}"
+    local total_files=$(get_stat "$TOTAL_FILE")
+    local formatted_files=$(get_stat "$SUCCESS_FILE")
+    local failed_files=$(get_stat "$FAILED_FILE")
 
-	if [[ $failed_files -gt 0 ]]; then
-		echo -e "${RED}失敗:         ${BOLD}$failed_files${NC}"
-	fi
+    echo -e "${BLUE}${BOLD}=== フォーマット結果 ===${NC}"
+    echo -e "${CYAN}処理ファイル数: ${BOLD}$total_files${NC}"
+    echo -e "${GREEN}成功:         ${BOLD}$formatted_files${NC}"
 
-	if [[ $total_files -eq 0 ]]; then
-		echo -e "${YELLOW}${ARROW} 対象ファイルが見つかりませんでした${NC}"
-		echo -e "${YELLOW}${ARROW} 対象拡張子: .c, .cpp, .cxx, .cc, .C, .h, .hpp, .hxx${NC}"
-	elif [[ $formatted_files -eq $total_files ]]; then
-		echo -e "${GREEN}${CHECK} すべてのファイルが正常にフォーマットされました！${NC}"
-	fi
-	echo
+    if [[ $failed_files -gt 0 ]]; then
+        echo -e "${RED}失敗:         ${BOLD}$failed_files${NC}"
+    fi
+
+    if [[ $total_files -eq 0 ]]; then
+        echo -e "${YELLOW}${ARROW} 対象ファイルが見つかりませんでした${NC}"
+        echo -e "${YELLOW}${ARROW} 対象拡張子: .c, .cpp, .cxx, .cc, .C, .h, .hpp, .hxx${NC}"
+    elif [[ $formatted_files -eq $total_files ]]; then
+        echo -e "${GREEN}${CHECK} すべてのファイルが正常にフォーマットされました！${NC}"
+    fi
+    echo
+}
+
+# ヘルプメッセージ
+show_help() {
+    echo -e "${BOLD}${CYAN}C/C++ Code Formatter (マルチスレッド対応)${NC}"
+    echo -e "${CYAN}============================================${NC}"
+    echo
+    echo -e "${BOLD}使用方法:${NC}"
+    echo -e "  $0 [OPTIONS] DIRECTORY"
+    echo
+    echo -e "${BOLD}オプション:${NC}"
+    echo -e "  -j, --jobs NUM     並列処理数を指定 (デフォルト: $DEFAULT_JOBS)"
+    echo -e "  -h, --help         このヘルプメッセージを表示"
+    echo
+    echo -e "${BOLD}例:${NC}"
+    echo -e "  $0 src                    # srcディレクトリを$DEFAULT_JOBS並列でフォーマット"
+    echo -e "  $0 -j 8 src              # srcディレクトリを8並列でフォーマット"
+    echo -e "  $0 --jobs 2 ./project    # projectディレクトリを2並列でフォーマット"
+    echo
 }
 
 # メイン処理
 main() {
-	if [[ "$#" -eq 0 ]]; then
-		echo -e "${RED}${CROSS} エラー: ディレクトリが指定されていません${NC}" >&2
-		echo -e "${YELLOW}${ARROW} 使用方法: $0 [ディレクトリ名]${NC}" >&2
-		echo -e "${YELLOW}${ARROW} 例: $0 src${NC}" >&2
-		exit 1
-	fi
-	target_dir="$1"
+    # 引数解析
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -j|--jobs)
+                if [[ -n "$2" ]] && [[ "$2" =~ ^[0-9]+$ ]] && [[ "$2" -gt 0 ]]; then
+                    jobs="$2"
+                    shift 2
+                else
+                    echo -e "${RED}${CROSS} エラー: --jobs には正の整数を指定してください${NC}" >&2
+                    exit 1
+                fi
+                ;;
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -*)
+                echo -e "${RED}${CROSS} エラー: 不明なオプション '$1'${NC}" >&2
+                show_help
+                exit 1
+                ;;
+            *)
+                target_dir="$1"
+                shift
+                ;;
+        esac
+    done
 
-	echo -e "${BOLD}${CYAN}C/C++ Code Formatter${NC}"
-	echo -e "${CYAN}=====================${NC}"
-	echo
+    if [[ -z "$target_dir" ]]; then
+        echo -e "${RED}${CROSS} エラー: ディレクトリが指定されていません${NC}" >&2
+        show_help
+        exit 1
+    fi
 
-	# スタイル設定を読み込み
-	load_format_style
+    echo -e "${BOLD}${CYAN}C/C++ Code Formatter (マルチスレッド対応)${NC}"
+    echo -e "${CYAN}============================================${NC}"
+    echo
 
-	# 依存関係チェック
-	local has_tree=0
-	if check_dependencies; then
-		has_tree=1
-	fi
+    # 統計情報を初期化
+    init_stats
+    trap cleanup EXIT
 
-	# ディレクトリ存在チェック
-	if [[ ! -d "$target_dir" ]]; then
-		echo -e "${RED}${CROSS} エラー: ディレクトリ '$target_dir' が存在しません${NC}" >&2
-		echo -e "${YELLOW}${ARROW} 使用方法: $0 [ディレクトリ名]${NC}" >&2
-		echo -e "${YELLOW}${ARROW} 例: $0 src${NC}" >&2
-		exit 1
-	fi
+    # スタイル設定を読み込み
+    load_format_style
 
-	# ディレクトリ構造表示
-	show_directory_structure "$target_dir" "$has_tree"
+    # 依存関係チェック
+    local has_tree=0
+    if check_dependencies; then
+        has_tree=1
+    fi
 
-	# フォーマット実行
-	format_directory "$target_dir"
+    # ディレクトリ存在チェック
+    if [[ ! -d "$target_dir" ]]; then
+        echo -e "${RED}${CROSS} エラー: ディレクトリ '$target_dir' が存在しません${NC}" >&2
+        exit 1
+    fi
 
-	# 統計情報表示
-	show_statistics
+    # ディレクトリ構造表示
+    show_directory_structure "$target_dir" "$has_tree"
+
+    # フォーマット実行（parallelが利用可能かどうかで分岐）
+    if command -v parallel >/dev/null 2>&1; then
+        format_with_parallel "$target_dir"
+    else
+        format_with_bash "$target_dir"
+    fi
+
+    # 統計情報表示
+    show_statistics
 }
 
 # スクリプト実行
 main "$@"
+
