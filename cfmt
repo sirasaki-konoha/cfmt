@@ -77,16 +77,16 @@ load_format_style() {
             echo -e "${CYAN}  スタイル: ${BOLD}$clang_format_style${NC}"
         else
             echo -e "${YELLOW}${CROSS} .cfmtファイルが空です - デフォルトスタイルを使用${NC}"
-            clang_format_style="LLVM"
+            clang_format_style="Google"
         fi
     else
         # .cfmtファイルが存在しない場合
         echo -e "${YELLOW}${CROSS} .cfmtファイルが見つかりません - デフォルトスタイルを使用${NC}"
-        echo -e "${CYAN}  デフォルトスタイル: ${BOLD}LLVM${NC}"
+        echo -e "${CYAN}  デフォルトスタイル: ${BOLD}Google${NC}"
         echo -e "${YELLOW}  ヒント: .cfmtファイルにスタイルを指定できます${NC}"
-        echo -e "${YELLOW}    例: echo 'Google' > .cfmt${NC}"
+        echo -e "${YELLOW}    例: echo 'LLVM' > .cfmt${NC}"
         echo -e "${YELLOW}    利用可能スタイル: LLVM, GNU, Google, Chromium, Microsoft, Mozilla, WebKit${NC}"
-        clang_format_style="LLVM"
+        clang_format_style="Google"
     fi
 
     # .clang-formatファイルの存在もチェック
