@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 # これはAIに書かせてない
 # 私が書いたので堂々と著作権表記できる
 #
@@ -29,7 +28,6 @@ if [[ "$EUID" -ne 0 ]]; then
 	no_root=1
 fi
 
-
 run_cmd_on_root() {
 	echo -e "${YELLOW}${ARROW} ${BOLD}${CYAN}$@"
 	if [[ "$no_root" -eq 1 ]]; then
@@ -43,7 +41,7 @@ run_cmd_on_root() {
 
 check_installed() {
 	if [[ -f "/usr/bin/cfmt" ]]; then
-		echo -e "${YELLOW}${ARROW} cfmt already installed!${NC}"
+		echo -e "${YELLOW}${BOLD}${ARROW}${NC}${YELLOW} cfmt is already installed!${NC}"
 		printf "${YELLOW}Would you like to reinstall?${NC} "
 		read -n1 val
 		echo
@@ -80,32 +78,32 @@ master() {
 	echo -e "${NC}"
 
 	case ${install} in
-		yes|y)
-			check_installed
-			check_depends
-			echo -e "${YELLOW}${ARROW} Request sudo...${NC}"
-			if ! sudo -v; then
-				echo -e "${RED}${ARROW} Failed to request sudo${NC}"
+	yes | y)
+		check_installed
+		check_depends
+		echo -e "${YELLOW}${ARROW} Request sudo...${NC}"
+		if ! sudo -v; then
+			echo -e "${RED}${ARROW} Failed to request sudo${NC}"
+			exit 1
+		fi
+		if [[ -f "cfmt" ]]; then
+			if ! run_cmd_on_root install -Dm755 ./cfmt /usr/bin; then
+				echo -e "${RED}${CROSS} Failed to install cfmt${NC}"
+				echo
 				exit 1
 			fi
-			if [[ -f "cfmt" ]]; then
-				if ! run_cmd_on_root install -Dm755 ./cfmt /usr/bin; then
-					echo -e "${RED}${CROSS} Failed to install cfmt${NC}"
-					echo
-					exit 1
-				fi
-				echo -e "${GREEN}Installation finished!${NC}"
-				echo -e "Run \`cfmt <directory>\` to format files!"
-				echo
-				exit
-			fi
-			;;
-		*)
-			echo -e "${RED}${CROSS} Installation canceled.${NC}"
+			echo -e "${GREEN}Installation finished!${NC}"
+			echo -e "Run \`cfmt <directory>\` to format files!"
 			echo
-			exit 1
+			exit
+		fi
+		;;
+	*)
+		echo -e "${RED}${CROSS} Installation canceled.${NC}"
+		echo
+		exit 1
+		;;
 	esac
 }
 
 master
-

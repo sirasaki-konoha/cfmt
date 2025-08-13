@@ -29,193 +29,192 @@ clang_format_style=""
 
 # スタイル設定を読み込み
 load_format_style() {
-    local cfmt_file=".cfmt"
-    
-    echo -e "${BLUE}${BOLD}=== スタイル設定 ===${NC}"
-    
-    if [[ -f "$cfmt_file" ]]; then
-        # .cfmtファイルが存在する場合
-        local style_content=$(cat "$cfmt_file" 2>/dev/null | tr -d '\n\r' | sed 's/[[:space:]]*$//')
-        
-        if [[ -n "$style_content" ]]; then
-            clang_format_style="$style_content"
-            echo -e "${GREEN}${CHECK} .cfmtファイルからスタイルを読み込みました${NC}"
-            echo -e "${CYAN}  スタイル: ${BOLD}$clang_format_style${NC}"
-        else
-            echo -e "${YELLOW}${CROSS} .cfmtファイルが空です - デフォルトスタイルを使用${NC}"
-            clang_format_style="LLVM"
-        fi
-    else
-        # .cfmtファイルが存在しない場合
-        echo -e "${YELLOW}${CROSS} .cfmtファイルが見つかりません - デフォルトスタイルを使用${NC}"
-        echo -e "${CYAN}  デフォルトスタイル: ${BOLD}LLVM${NC}"
-        echo -e "${YELLOW}  ヒント: .cfmtファイルにスタイルを指定できます${NC}"
-        echo -e "${YELLOW}    例: echo 'Google' > .cfmt${NC}"
-        echo -e "${YELLOW}    利用可能スタイル: LLVM, GNU, Google, Chromium, Microsoft, Mozilla, WebKit${NC}"
-        clang_format_style="LLVM"
-    fi
-    
-    # .clang-formatファイルの存在もチェック
-    if [[ -f ".clang-format" ]] || [[ -f "_clang-format" ]]; then
-        echo -e "${BLUE}${ARROW} .clang-formatファイルも検出されました (こちらが優先されます)${NC}"
-    fi
-    
-    echo
+	local cfmt_file=".cfmt"
+
+	echo -e "${BLUE}${BOLD}=== スタイル設定 ===${NC}"
+
+	if [[ -f "$cfmt_file" ]]; then
+		# .cfmtファイルが存在する場合
+		local style_content=$(cat "$cfmt_file" 2>/dev/null | tr -d '\n\r' | sed 's/[[:space:]]*$//')
+
+		if [[ -n "$style_content" ]]; then
+			clang_format_style="$style_content"
+			echo -e "${GREEN}${CHECK} .cfmtファイルからスタイルを読み込みました${NC}"
+			echo -e "${CYAN}  スタイル: ${BOLD}$clang_format_style${NC}"
+		else
+			echo -e "${YELLOW}${CROSS} .cfmtファイルが空です - デフォルトスタイルを使用${NC}"
+			clang_format_style="LLVM"
+		fi
+	else
+		# .cfmtファイルが存在しない場合
+		echo -e "${YELLOW}${CROSS} .cfmtファイルが見つかりません - デフォルトスタイルを使用${NC}"
+		echo -e "${CYAN}  デフォルトスタイル: ${BOLD}LLVM${NC}"
+		echo -e "${YELLOW}  ヒント: .cfmtファイルにスタイルを指定できます${NC}"
+		echo -e "${YELLOW}    例: echo 'Google' > .cfmt${NC}"
+		echo -e "${YELLOW}    利用可能スタイル: LLVM, GNU, Google, Chromium, Microsoft, Mozilla, WebKit${NC}"
+		clang_format_style="LLVM"
+	fi
+
+	# .clang-formatファイルの存在もチェック
+	if [[ -f ".clang-format" ]] || [[ -f "_clang-format" ]]; then
+		echo -e "${BLUE}${ARROW} .clang-formatファイルも検出されました (こちらが優先されます)${NC}"
+	fi
+
+	echo
 }
 check_dependencies() {
-    echo -e "${BLUE}${BOLD}=== 依存関係チェック ===${NC}"
-    
-    if ! command -v clang-format >/dev/null 2>&1; then
-        echo -e "${RED}${CROSS} clang-formatが見つかりません${NC}" >&2
-        echo -e "${YELLOW}  インストール方法:${NC}"
-        echo -e "    Ubuntu/Debian: ${CYAN}sudo apt install clang-format${NC}"
-        echo -e "    CentOS/RHEL:   ${CYAN}sudo yum install clang-tools-extra${NC}"
-        echo -e "    macOS:         ${CYAN}brew install clang-format${NC}"
-        exit 1
-    fi
-    
-    echo -e "${GREEN}${CHECK} clang-format: $(clang-format --version | head -n1)${NC}"
-    
-    if command -v tree >/dev/null 2>&1; then
-        echo -e "${GREEN}${CHECK} tree: $(tree --version | head -n1)${NC}"
-        echo
-        return 0
-    else
-        echo -e "${YELLOW}${CROSS} tree コマンドが利用できません (オプション)${NC}"
-        echo
-        return 1
-    fi
+	echo -e "${BLUE}${BOLD}=== 依存関係チェック ===${NC}"
+
+	if ! command -v clang-format >/dev/null 2>&1; then
+		echo -e "${RED}${CROSS} clang-formatが見つかりません${NC}" >&2
+		echo -e "${YELLOW}  インストール方法:${NC}"
+		echo -e "    Ubuntu/Debian: ${CYAN}sudo apt install clang-format${NC}"
+		echo -e "    CentOS/RHEL:   ${CYAN}sudo yum install clang-tools-extra${NC}"
+		echo -e "    macOS:         ${CYAN}brew install clang-format${NC}"
+		exit 1
+	fi
+
+	echo -e "${GREEN}${CHECK} clang-format: $(clang-format --version | head -n1)${NC}"
+
+	if command -v tree >/dev/null 2>&1; then
+		echo -e "${GREEN}${CHECK} tree: $(tree --version | head -n1)${NC}"
+		echo
+		return 0
+	else
+		echo -e "${YELLOW}${CROSS} tree コマンドが利用できません (オプション)${NC}"
+		echo
+		return 1
+	fi
 }
 
 # ディレクトリ構造を表示
 show_directory_structure() {
-    local target_dir="$1"
-    local has_tree="$2"
-    
-    echo -e "${BLUE}${BOLD}=== ディレクトリ構造 ===${NC}"
-    
-    if [[ ! -d "$target_dir" ]]; then
-        echo -e "${RED}${CROSS} ディレクトリ '$target_dir' が存在しません${NC}" >&2
-        return 1
-    fi
-    
-    if [[ $has_tree -eq 1 ]]; then
-        tree "$target_dir" 2>/dev/null || echo -e "${FOLDER} $target_dir/"
-    else
-        echo -e "${FOLDER} $target_dir/"
-        find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null | \
-            head -10 | sed "s|^|  ${ARROW} |"
-        local count=$(find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null | wc -l)
-        if [[ $count -gt 10 ]]; then
-            echo -e "  ${ARROW} ... and $((count - 10)) more files"
-        fi
-    fi
-    echo
+	local target_dir="$1"
+	local has_tree="$2"
+
+	echo -e "${BLUE}${BOLD}=== ディレクトリ構造 ===${NC}"
+
+	if [[ ! -d "$target_dir" ]]; then
+		echo -e "${RED}${CROSS} ディレクトリ '$target_dir' が存在しません${NC}" >&2
+		return 1
+	fi
+
+	if [[ $has_tree -eq 1 ]]; then
+		tree "$target_dir" 2>/dev/null || echo -e "${FOLDER} $target_dir/"
+	else
+		echo -e "${FOLDER} $target_dir/"
+		find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null |
+			head -10 | sed "s|^|  ${ARROW} |"
+		local count=$(find "$target_dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.cc" -o -name "*.C" -o -name "*.h" -o -name "*.hpp" -o -name "*.hxx" \) 2>/dev/null | wc -l)
+		if [[ $count -gt 10 ]]; then
+			echo -e "  ${ARROW} ... and $((count - 10)) more files"
+		fi
+	fi
+	echo
 }
 
 # 再帰的にディレクトリをフォーマット
 format_directory() {
-    local target_dir="$1"
-    local base_dir="$(cd "$target_dir" && pwd)"
-    
-    echo -e "${BLUE}${BOLD}=== フォーマット実行 ===${NC}"
-    echo -e "${CYAN}対象ディレクトリ: $target_dir${NC}"
-    echo
-    
-    # findで対象ファイルを検索してフォーマット
-    while IFS= read -r -d '' file; do
-        ((total_files++))
-        
-        local relative_path="${file#$base_dir/}"
-        echo -n "Processing: $relative_path ... "
-        
-        # スタイル指定でclang-formatを実行
-        local format_cmd="clang-format -i"
-        if [[ -n "$clang_format_style" ]] && [[ ! -f ".clang-format" ]] && [[ ! -f "_clang-format" ]]; then
-            format_cmd="clang-format -i -style=$clang_format_style"
-        fi
-        
-        if eval "$format_cmd \"$file\"" 2>/dev/null; then
-            ((formatted_files++))
-            echo -e "${GREEN}${CHECK} Success${NC}"
-        else
-            ((failed_files++))
-            echo -e "${RED}${CROSS} Failed${NC}"
-        fi
-    done < <(find "$target_dir" -type f \( \
-        -name "*.c" -o \
-        -name "*.cpp" -o \
-        -name "*.cxx" -o \
-        -name "*.cc" -o \
-        -name "*.C" -o \
-        -name "*.h" -o \
-        -name "*.hpp" -o \
-        -name "*.hxx" \
-    \) -print0 2>/dev/null)
-    
-    echo
+	local target_dir="$1"
+	local base_dir="$(cd "$target_dir" && pwd)"
+
+	echo -e "${BLUE}${BOLD}=== フォーマット実行 ===${NC}"
+	echo -e "${CYAN}対象ディレクトリ: $target_dir${NC}"
+	echo
+
+	# findで対象ファイルを検索してフォーマット
+	while IFS= read -r -d '' file; do
+		((total_files++))
+
+		local relative_path="${file#$base_dir/}"
+		echo -n "Processing: $relative_path ... "
+
+		# スタイル指定でclang-formatを実行
+		local format_cmd="clang-format -i"
+		if [[ -n "$clang_format_style" ]] && [[ ! -f ".clang-format" ]] && [[ ! -f "_clang-format" ]]; then
+			format_cmd="clang-format -i -style=$clang_format_style"
+		fi
+
+		if eval "$format_cmd \"$file\"" 2>/dev/null; then
+			((formatted_files++))
+			echo -e "${GREEN}${CHECK} Success${NC}"
+		else
+			((failed_files++))
+			echo -e "${RED}${CROSS} Failed${NC}"
+		fi
+	done < <(find "$target_dir" -type f \( \
+		-name "*.c" -o \
+		-name "*.cpp" -o \
+		-name "*.cxx" -o \
+		-name "*.cc" -o \
+		-name "*.C" -o \
+		-name "*.h" -o \
+		-name "*.hpp" -o \
+		-name "*.hxx" \
+		\) -print0 2>/dev/null)
+
+	echo
 }
 
 # 統計情報を表示
 show_statistics() {
-    echo -e "${BLUE}${BOLD}=== フォーマット結果 ===${NC}"
-    echo -e "${CYAN}処理ファイル数: ${BOLD}$total_files${NC}"
-    echo -e "${GREEN}成功:         ${BOLD}$formatted_files${NC}"
-    
-    if [[ $failed_files -gt 0 ]]; then
-        echo -e "${RED}失敗:         ${BOLD}$failed_files${NC}"
-    fi
-    
-    if [[ $total_files -eq 0 ]]; then
-        echo -e "${YELLOW}${ARROW} 対象ファイルが見つかりませんでした${NC}"
-        echo -e "${YELLOW}${ARROW} 対象拡張子: .c, .cpp, .cxx, .cc, .C, .h, .hpp, .hxx${NC}"
-    elif [[ $formatted_files -eq $total_files ]]; then
-        echo -e "${GREEN}${CHECK} すべてのファイルが正常にフォーマットされました！${NC}"
-    fi
-    echo
+	echo -e "${BLUE}${BOLD}=== フォーマット結果 ===${NC}"
+	echo -e "${CYAN}処理ファイル数: ${BOLD}$total_files${NC}"
+	echo -e "${GREEN}成功:         ${BOLD}$formatted_files${NC}"
+
+	if [[ $failed_files -gt 0 ]]; then
+		echo -e "${RED}失敗:         ${BOLD}$failed_files${NC}"
+	fi
+
+	if [[ $total_files -eq 0 ]]; then
+		echo -e "${YELLOW}${ARROW} 対象ファイルが見つかりませんでした${NC}"
+		echo -e "${YELLOW}${ARROW} 対象拡張子: .c, .cpp, .cxx, .cc, .C, .h, .hpp, .hxx${NC}"
+	elif [[ $formatted_files -eq $total_files ]]; then
+		echo -e "${GREEN}${CHECK} すべてのファイルが正常にフォーマットされました！${NC}"
+	fi
+	echo
 }
 
 # メイン処理
 main() {
-		if [[ "$#" -eq 0 ]]; then
-        echo -e "${RED}${CROSS} エラー: ディレクトリが指定されていません${NC}" >&2
-        echo -e "${YELLOW}${ARROW} 使用方法: $0 [ディレクトリ名]${NC}" >&2
-        echo -e "${YELLOW}${ARROW} 例: $0 src${NC}" >&2
-        exit 1
-		fi
-		target_dir="$1"
-    
-    echo -e "${BOLD}${CYAN}C/C++ Code Formatter${NC}"
-    echo -e "${CYAN}=====================${NC}"
-    echo
-    
-    # スタイル設定を読み込み
-    load_format_style
-    
-    # 依存関係チェック
-    local has_tree=0
-    if check_dependencies; then
-        has_tree=1
-    fi
-    
-    # ディレクトリ存在チェック
-    if [[ ! -d "$target_dir" ]]; then
-        echo -e "${RED}${CROSS} エラー: ディレクトリ '$target_dir' が存在しません${NC}" >&2
-        echo -e "${YELLOW}${ARROW} 使用方法: $0 [ディレクトリ名]${NC}" >&2
-        echo -e "${YELLOW}${ARROW} 例: $0 src${NC}" >&2
-        exit 1
-    fi
-    
-    # ディレクトリ構造表示
-    show_directory_structure "$target_dir" "$has_tree"
-    
-    # フォーマット実行
-    format_directory "$target_dir"
-    
-    # 統計情報表示
-    show_statistics
+	if [[ "$#" -eq 0 ]]; then
+		echo -e "${RED}${CROSS} エラー: ディレクトリが指定されていません${NC}" >&2
+		echo -e "${YELLOW}${ARROW} 使用方法: $0 [ディレクトリ名]${NC}" >&2
+		echo -e "${YELLOW}${ARROW} 例: $0 src${NC}" >&2
+		exit 1
+	fi
+	target_dir="$1"
+
+	echo -e "${BOLD}${CYAN}C/C++ Code Formatter${NC}"
+	echo -e "${CYAN}=====================${NC}"
+	echo
+
+	# スタイル設定を読み込み
+	load_format_style
+
+	# 依存関係チェック
+	local has_tree=0
+	if check_dependencies; then
+		has_tree=1
+	fi
+
+	# ディレクトリ存在チェック
+	if [[ ! -d "$target_dir" ]]; then
+		echo -e "${RED}${CROSS} エラー: ディレクトリ '$target_dir' が存在しません${NC}" >&2
+		echo -e "${YELLOW}${ARROW} 使用方法: $0 [ディレクトリ名]${NC}" >&2
+		echo -e "${YELLOW}${ARROW} 例: $0 src${NC}" >&2
+		exit 1
+	fi
+
+	# ディレクトリ構造表示
+	show_directory_structure "$target_dir" "$has_tree"
+
+	# フォーマット実行
+	format_directory "$target_dir"
+
+	# 統計情報表示
+	show_statistics
 }
 
 # スクリプト実行
 main "$@"
-
